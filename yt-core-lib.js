@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         yt-core-lib
 // @namespace    https://github.com/chirag127
-// @version      1.3.0
+// @version      1.4.0
 // @description  Shared core for the YouTube userscripts: synced storage, one AI key, InnerTube reads/writes, SAPISIDHASH auth, and small UI helpers. Not a standalone script — @require it.
 // @author       chirag127
 // @license      MIT
@@ -29,7 +29,7 @@
   'use strict';
 
   var NS = 'ytk';
-  var VERSION = '1.3.0';
+  var VERSION = '1.4.0';
 
   var DEFAULTS = {
     aiBaseUrl: 'https://api.openai.com/v1',
@@ -551,6 +551,36 @@
     try { alert(text); } catch (e) { /* ignore */ }
   }
 
+  /**
+   * Read one playlist row into { id, title, duration, channel, watched }. Handles the current
+   * lockup shape and the legacy renderers. Lives here because notes and decay both needed it —
+   * duplicated row extraction is exactly what the core exists to prevent.
+   */
+  function readRowNode(node) {
+    if (!node) return null;
+    var isLockup = node.tagName && node.tagName.toLowerCase() === 'yt-lockup-view-model';
+    if (isLockup) {
+      var item = lockupToItem(node);
+      if (!item) return null;
+      return {
+        id: item.id, title: item.title, duration: item.duration, channel: item.channel,
+        watched: !!node.querySelector('yt-thumbnail-overlay-progress-bar-view-model, ytd-thumbnail-overlay-resume-playback-renderer')
+      };
+    }
+    var link = node.querySelector('a#video-title, a#wc-endpoint, a[href*="watch?v="]');
+    var href = link ? (link.getAttribute('href') || '') : '';
+    var m = href.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+    var titleEl = node.querySelector('a#video-title, #video-title');
+    var durEl = node.querySelector('#time-status #text, ytd-thumbnail-overlay-time-status-renderer #text');
+    var chanEl = node.querySelector('#channel-name a, ytd-channel-name a');
+    return {
+      id: m ? m[1] : null,
+      title: titleEl ? (titleEl.getAttribute('title') || titleEl.textContent || '').trim() : '',
+      duration: durEl ? durEl.textContent.trim() : '',
+      channel: chanEl ? chanEl.textContent.trim() : '',
+      watched: !!node.querySelector('ytd-thumbnail-overlay-resume-playback-renderer')
+    };
+  }
   // ---------------------------------------------------------------- shared UI
 
   /**
@@ -781,8 +811,11 @@
     ensureSettingsCss();
     closeSettings();
 
-    var saved = settings();
-    var draft = Object.assign({}, saved);
+    // MERGE, do not overwrite: settings() only exposes the core DEFAULTS, so saving that view
+    // silently deleted every script-specific key. Work on the raw stored blob instead.
+    var blob = storeGet('settings', {}) || {};
+    var saved = Object.assign({}, settings(), blob);
+    var draft = Object.assign({}, blob);
 
     function getVal(f) {
       var v = saved[f.key];
@@ -917,9 +950,10 @@
     var cancelBtn = h('button', { class: 'yts-btn', text: 'Cancel' });
 
     saveBtn.addEventListener('click', function () {
-      for (var k in draft) if (Object.prototype.hasOwnProperty.call(draft, k)) saved[k] = draft[k];
-      saveSettings(saved);
-      if (typeof opts.onSave === 'function') opts.onSave(saved);
+      var merged = Object.assign({}, storeGet('settings', {}) || {}, draft);
+      storeSet('settings', merged);
+      var saved2 = settings();
+      if (typeof opts.onSave === 'function') opts.onSave(saved2);
       (opts.__cleanups || []).forEach(function (fn) { fn(); });
       closeSettings();
       msg.textContent = '';
@@ -1004,6 +1038,6 @@
     featureOn: featureOn, setFeature: setFeature,
     toast: toast, panel: panel, kv: kv, note: note, closePanel: closePanel, ensureCss: ensureCss,
     mountToolbar: mountToolbar,
-    openSettings: openSettings, closeSettings: closeSettings, normalizeCombo: normalizeCombo
+    openSettings: openSettings, closeSettings: closeSettings, normalizeCombo: normalizeCombo, readRowNode: readRowNode
   };
 })();
