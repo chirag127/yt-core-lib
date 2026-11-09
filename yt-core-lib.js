@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         yt-core-lib
 // @namespace    https://github.com/chirag127
-// @version      1.1.0
+// @version      1.1.1
 // @description  Shared core for the YouTube userscripts: synced storage, one AI key, InnerTube reads/writes, SAPISIDHASH auth, and small UI helpers. Not a standalone script — @require it.
 // @author       chirag127
 // @license      MIT
@@ -29,7 +29,7 @@
   'use strict';
 
   var NS = 'ytk';
-  var VERSION = '1.1.0';
+  var VERSION = '1.1.1';
 
   var DEFAULTS = {
     aiBaseUrl: 'https://api.openai.com/v1',
@@ -42,7 +42,8 @@
     tvMazeEnabled: true,
     tmdbKey: '',
     aniListEnabled: true,
-    features: {}
+    features: {},
+    hotkeyFeedback: false
   };
 
   // ---------------------------------------------------------------- storage
