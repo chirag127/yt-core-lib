@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         yt-core-lib
 // @namespace    https://github.com/chirag127
-// @version      1.1.1
+// @version      1.2.0
 // @description  Shared core for the YouTube userscripts: synced storage, one AI key, InnerTube reads/writes, SAPISIDHASH auth, and small UI helpers. Not a standalone script — @require it.
 // @author       chirag127
 // @license      MIT
@@ -29,7 +29,7 @@
   'use strict';
 
   var NS = 'ytk';
-  var VERSION = '1.1.1';
+  var VERSION = '1.2.0';
 
   var DEFAULTS = {
     aiBaseUrl: 'https://api.openai.com/v1',
@@ -698,6 +698,290 @@
     };
   }
 
+  // ---------------------------------------------------------------- the ONE settings popup
+
+  var SET_CSS_ID = 'ytk-settings-css';
+
+  function ensureSettingsCss() {
+    if (document.getElementById(SET_CSS_ID)) return;
+    var st = document.createElement('style');
+    st.id = SET_CSS_ID;
+    st.textContent = [
+      '.yts-scrim{position:fixed;inset:0;z-index:2147483600;background:rgba(0,0,0,.66);',
+      'display:flex;align-items:center;justify-content:center;padding:18px}',
+      '.yts-card{width:min(580px,100%);max-height:min(88vh,820px);display:flex;flex-direction:column;',
+      'border-radius:18px;background:#161616;color:#f1f1f1;box-shadow:0 24px 80px rgba(0,0,0,.7);',
+      'border:1px solid rgba(255,255,255,.08);font:400 13px/1.55 Roboto,Arial,system-ui,sans-serif;overflow:hidden}',
+      '.yts-card *{box-sizing:border-box}',
+      '.yts-head{display:flex;align-items:flex-start;gap:12px;padding:18px 20px 14px;',
+      'border-bottom:1px solid rgba(255,255,255,.09)}',
+      '.yts-head .t{flex:1;min-width:0}',
+      '.yts-head h3{margin:0;font-size:15.5px;font-weight:650;letter-spacing:.01em}',
+      '.yts-head p{margin:3px 0 0;font-size:12px;color:#9a9a9a}',
+      '.yts-x{border:0;background:transparent;color:#8f8f8f;cursor:pointer;font-size:19px;line-height:1;padding:2px 4px;border-radius:8px}',
+      '.yts-x:hover{background:rgba(255,255,255,.08);color:#fff}',
+      '.yts-body{overflow:auto;padding:4px 20px 10px}',
+      '.yts-sec{padding:14px 0 6px}',
+      '.yts-sec+.yts-sec{border-top:1px solid rgba(255,255,255,.07)}',
+      '.yts-sec>h4{margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#8f8f8f}',
+      '.yts-f{display:block;margin:0 0 12px}',
+      '.yts-f>span{display:block;font-size:11.5px;color:#9d9d9d;margin-bottom:5px}',
+      '.yts-f .hint{display:block;font-size:11px;color:#6f6f6f;margin-top:4px}',
+      '.yts-card input[type=text],.yts-card input[type=password],.yts-card input[type=number],',
+      '.yts-card select,.yts-card textarea{width:100%;font:inherit;font-size:12.5px;padding:8px 11px;',
+      'border-radius:10px;color:inherit;background:rgba(255,255,255,.06);',
+      'border:1px solid rgba(255,255,255,.14);outline:none}',
+      '.yts-card input:focus,.yts-card select:focus,.yts-card textarea:focus{border-color:#3ea6ff}',
+      '.yts-card textarea{min-height:92px;resize:vertical;font-family:ui-monospace,monospace;font-size:12px}',
+      '.yts-key{display:flex;align-items:center;gap:10px}',
+      '.yts-key kbd{flex:1;font:600 12px ui-monospace,monospace;padding:8px 11px;border-radius:10px;',
+      'background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14)}',
+      '.yts-key.armed kbd{border-color:#3ea6ff;color:#3ea6ff}',
+      '.yts-btn{font:inherit;font-size:12px;font-weight:600;padding:7px 13px;border-radius:9px;cursor:pointer;',
+      'color:inherit;background:transparent;border:1px solid rgba(255,255,255,.2)}',
+      '.yts-btn:hover{border-color:rgba(255,255,255,.45)}',
+      '.yts-btn.p{background:#3ea6ff;border-color:#3ea6ff;color:#0f0f0f}',
+      '.yts-chk{display:flex;align-items:center;gap:9px;padding:6px 0;cursor:pointer;font-size:12.5px}',
+      '.yts-chk input{width:15px;height:15px;accent-color:#3ea6ff;cursor:pointer}',
+      '.yts-foot{display:flex;align-items:center;gap:8px;padding:14px 20px 16px;',
+      'border-top:1px solid rgba(255,255,255,.09);background:#161616}',
+      '.yts-foot .grow{flex:1}',
+      '.yts-msg{font-size:11.5px;min-height:16px;padding:0 20px 10px;color:#9a9a9a}',
+      '.yts-msg.ok{color:#7ee787}',
+      '.yts-msg.bad{color:#ff8a80}'
+    ].join('');
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  var settingsScrim = null;
+
+  function closeSettings() {
+    if (settingsScrim && settingsScrim.parentNode) settingsScrim.remove();
+    settingsScrim = null;
+  }
+
+  /**
+   * The single settings surface for every script in the collection.
+   *
+   * opts = {
+   *   title, subtitle,
+   *   fields: [{ key, label, type, def, options, min, max, placeholder, hint }],
+   *   actions: [{ label, run }],
+   *   showAi: true
+   * }
+   *
+   * Values are written to the shared `ytk.settings` object, so the AI key is entered
+   * once and every script reads it. Nothing is drawn until this is called.
+   */
+  function openSettings(opts) {
+    opts = opts || {};
+    ensureSettingsCss();
+    closeSettings();
+
+    var saved = settings();
+    var draft = Object.assign({}, saved);
+
+    function getVal(f) {
+      var v = saved[f.key];
+      return v === undefined || v === null || v === '' ? f.def : v;
+    }
+
+    function field(f) {
+      var wrap = h('label', { class: 'yts-f' });
+      wrap.appendChild(h('span', { text: f.label }));
+      var input;
+
+      if (f.type === 'checkbox') {
+        wrap.className = 'yts-chk';
+        input = h('input', { type: 'checkbox' });
+        input.checked = !!getVal(f);
+        input.addEventListener('change', function () { draft[f.key] = input.checked; });
+        wrap.appendChild(input);
+        wrap.appendChild(h('span', { text: f.label }));
+      } else if (f.type === 'select') {
+        input = h('select');
+        (f.options || []).forEach(function (o) {
+          var opt = h('option', { value: o, text: o });
+          if (String(getVal(f)) === String(o)) opt.selected = true;
+          input.appendChild(opt);
+        });
+        draft[f.key] = getVal(f);
+        input.addEventListener('change', function () { draft[f.key] = input.value; });
+        wrap.appendChild(input);
+      } else if (f.type === 'textarea') {
+        input = h('textarea');
+        input.value = Array.isArray(getVal(f)) ? getVal(f).join('\n') : String(getVal(f) || '');
+        input.addEventListener('input', function () {
+          draft[f.key] = f.split ? input.value.split('\n').map(function (x) { return x.trim(); }).filter(Boolean) : input.value;
+        });
+        wrap.appendChild(input);
+      } else if (f.type === 'key') {
+        var holder = h('div', { class: 'yts-key' });
+        var kb = h('kbd', { text: String(getVal(f)) });
+        var btn = h('button', { class: 'yts-btn', text: 'Rebind' });
+        var armed = false;
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          armed = true;
+          holder.className = 'yts-key armed';
+          btn.textContent = 'Press a key…';
+        });
+        holder.appendChild(kb);
+        holder.appendChild(btn);
+        wrap.appendChild(holder);
+        var capture = function (e) {
+          if (!armed) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.key === 'Escape') {
+            armed = false;
+            holder.className = 'yts-key';
+            btn.textContent = 'Rebind';
+            return;
+          }
+          var combo = normalizeCombo(e);
+          if (!combo) return;
+          draft[f.key] = combo;
+          kb.textContent = combo;
+          armed = false;
+          holder.className = 'yts-key';
+          btn.textContent = 'Rebind';
+        };
+        document.addEventListener('keydown', capture, true);
+        (opts.__cleanups = opts.__cleanups || []).push(function () {
+          document.removeEventListener('keydown', capture, true);
+        });
+      } else {
+        input = h('input', { type: f.type === 'password' ? 'password' : f.type === 'number' ? 'number' : 'text' });
+        input.value = getVal(f) === undefined ? '' : getVal(f);
+        if (f.placeholder) input.placeholder = f.placeholder;
+        input.addEventListener('input', function () {
+          draft[f.key] = f.type === 'number' ? (parseInt(input.value, 10) || f.def) : input.value;
+        });
+        wrap.appendChild(input);
+      }
+
+      if (f.hint) wrap.appendChild(h('span', { class: 'hint', text: f.hint }));
+      return wrap;
+    }
+
+    var body = h('div', { class: 'yts-body' });
+    var msg = h('div', { class: 'yts-msg' });
+
+    if (opts.fields && opts.fields.length) {
+      var sec = h('div', { class: 'yts-sec' }, h('h4', { text: opts.sectionTitle || 'Options' }));
+      opts.fields.forEach(function (f) { sec.appendChild(field(f)); });
+      body.appendChild(sec);
+    }
+
+    if (opts.showAi !== false) {
+      var aiSec = h('div', { class: 'yts-sec' }, h('h4', { text: 'AI — shared by every script' }));
+      aiSec.appendChild(field({ key: 'aiBaseUrl', label: 'Endpoint', type: 'text', def: DEFAULTS.aiBaseUrl, placeholder: 'https://api.openai.com/v1' }));
+      aiSec.appendChild(field({ key: 'aiKey', label: 'API key', type: 'password', def: '', hint: 'Stored once in ScriptCat storage and synced by its cloud backup.' }));
+      aiSec.appendChild(field({ key: 'aiModel', label: 'Model', type: 'text', def: '', placeholder: 'gpt-4o-mini' }));
+      var test = h('button', {
+        class: 'yts-btn',
+        text: 'Test connection',
+        onclick: function () {
+          saveSettings(draft);
+          msg.className = 'yts-msg';
+          msg.textContent = 'Testing…';
+          aiChat([{ role: 'user', content: 'Reply with the single word: ok' }], { temperature: 0 }).then(function (res) {
+            msg.className = 'yts-msg ' + (res.ok ? 'ok' : 'bad');
+            msg.textContent = res.ok ? 'Connected — model replied: ' + res.text.slice(0, 40) : 'Failed: ' + res.error;
+          });
+        }
+      });
+      aiSec.appendChild(test);
+      body.appendChild(aiSec);
+    }
+
+    if (opts.actions && opts.actions.length) {
+      var actSec = h('div', { class: 'yts-sec' }, h('h4', { text: 'Actions' }));
+      opts.actions.forEach(function (a) {
+        actSec.appendChild(h('div', { style: 'padding:4px 0' },
+          h('button', {
+            class: 'yts-btn', text: a.label,
+            onclick: function () { closeSettings(); if (typeof a.run === 'function') a.run(); }
+          })
+        ));
+      });
+      body.appendChild(actSec);
+    }
+
+    var saveBtn = h('button', { class: 'yts-btn p', text: 'Save' });
+    var resetBtn = h('button', { class: 'yts-btn', text: 'Reset' });
+    var cancelBtn = h('button', { class: 'yts-btn', text: 'Cancel' });
+
+    saveBtn.addEventListener('click', function () {
+      for (var k in draft) if (Object.prototype.hasOwnProperty.call(draft, k)) saved[k] = draft[k];
+      saveSettings(saved);
+      if (typeof opts.onSave === 'function') opts.onSave(saved);
+      (opts.__cleanups || []).forEach(function (fn) { fn(); });
+      closeSettings();
+      msg.textContent = '';
+      try { toast(opts.title + ' — saved'); } catch (e) { /* ignore */ }
+      if (opts.reload !== false) setTimeout(function () { location.reload(); }, 220);
+    });
+
+    resetBtn.addEventListener('click', function () {
+      if (!confirm('Reset this script\'s settings to defaults?')) return;
+      var next = settings();
+      (opts.fields || []).forEach(function (f) { delete next[f.key]; });
+      saveSettings(next);
+      (opts.__cleanups || []).forEach(function (fn) { fn(); });
+      closeSettings();
+      setTimeout(function () { location.reload(); }, 200);
+    });
+
+    cancelBtn.addEventListener('click', function () {
+      (opts.__cleanups || []).forEach(function (fn) { fn(); });
+      closeSettings();
+    });
+
+    var card = h('div', { class: 'yts-card' },
+      h('div', { class: 'yts-head' },
+        h('div', { class: 't' },
+          h('h3', { text: opts.title || 'Settings' }),
+          h('p', { text: opts.subtitle || 'These settings apply to this script. The AI key is shared by every script.' })
+        ),
+        h('button', { class: 'yts-x', text: '✕', onclick: function () { (opts.__cleanups || []).forEach(function (fn) { fn(); }); closeSettings(); } })
+      ),
+      body,
+      msg,
+      h('div', { class: 'yts-foot' }, saveBtn, resetBtn, h('span', { class: 'grow' }), cancelBtn)
+    );
+
+    var scrim = h('div', { class: 'yts-scrim' }, card);
+    scrim.addEventListener('click', function (e) { if (e.target === scrim) { (opts.__cleanups || []).forEach(function (fn) { fn(); }); closeSettings(); } });
+    (document.body || document.documentElement).appendChild(scrim);
+    settingsScrim = scrim;
+
+    var esc = function (e) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      (opts.__cleanups || []).forEach(function (fn) { fn(); });
+      closeSettings();
+    };
+    document.addEventListener('keydown', esc, true);
+    (opts.__cleanups = opts.__cleanups || []).push(function () { document.removeEventListener('keydown', esc, true); });
+
+    return scrim;
+  }
+
+  /** Canonical combo string for a keyboard event: ctrl+alt+shift+meta+key. */
+  function normalizeCombo(e) {
+    var dead = ['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'Dead', 'Unidentified'];
+    if (e.isComposing || !e.key || dead.indexOf(e.key) !== -1) return null;
+    var mods = [];
+    if (e.ctrlKey) mods.push('ctrl');
+    if (e.altKey) mods.push('alt');
+    if (e.shiftKey) mods.push('shift');
+    if (e.metaKey) mods.push('meta');
+    return mods.concat(e.key.toLowerCase()).join('+');
+  }
+
   return {
     VERSION: VERSION,
     NS: NS,
@@ -716,6 +1000,7 @@
     notify: notify,
     featureOn: featureOn, setFeature: setFeature,
     toast: toast, panel: panel, kv: kv, note: note, closePanel: closePanel, ensureCss: ensureCss,
-    mountToolbar: mountToolbar
+    mountToolbar: mountToolbar,
+    openSettings: openSettings, closeSettings: closeSettings, normalizeCombo: normalizeCombo
   };
 })();
