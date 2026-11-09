@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         yt-core-lib
 // @namespace    https://github.com/chirag127
-// @version      1.2.0
+// @version      1.3.0
 // @description  Shared core for the YouTube userscripts: synced storage, one AI key, InnerTube reads/writes, SAPISIDHASH auth, and small UI helpers. Not a standalone script — @require it.
 // @author       chirag127
 // @license      MIT
@@ -29,7 +29,7 @@
   'use strict';
 
   var NS = 'ytk';
-  var VERSION = '1.2.0';
+  var VERSION = '1.3.0';
 
   var DEFAULTS = {
     aiBaseUrl: 'https://api.openai.com/v1',
@@ -670,6 +670,9 @@
    */
   function mountToolbar(items) {
     ensureCss();
+    // Each script gets its own sandbox, so module state is NOT shared between scripts.
+    // Reuse the bar already in the DOM, otherwise every script draws its own.
+    toolbarEl = document.querySelector('.ytk2-bar');
     if (!toolbarEl) {
       toolbarEl = h('div', { class: 'ytk2-bar' });
       (document.body || document.documentElement).appendChild(toolbarEl);
