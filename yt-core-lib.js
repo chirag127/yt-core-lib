@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         yt-core-lib
 // @namespace    https://github.com/chirag127
-// @version      1.0.0
+// @version      1.1.0
 // @description  Shared core for the YouTube userscripts: synced storage, one AI key, InnerTube reads/writes, SAPISIDHASH auth, and small UI helpers. Not a standalone script — @require it.
 // @author       chirag127
 // @license      MIT
@@ -29,7 +29,7 @@
   'use strict';
 
   var NS = 'ytk';
-  var VERSION = '1.0.0';
+  var VERSION = '1.1.0';
 
   var DEFAULTS = {
     aiBaseUrl: 'https://api.openai.com/v1',
@@ -41,7 +41,8 @@
     seriesPrivacy: 'PRIVATE',
     tvMazeEnabled: true,
     tmdbKey: '',
-    aniListEnabled: true
+    aniListEnabled: true,
+    features: {}
   };
 
   // ---------------------------------------------------------------- storage
@@ -549,6 +550,153 @@
     try { alert(text); } catch (e) { /* ignore */ }
   }
 
+  // ---------------------------------------------------------------- shared UI
+
+  /**
+   * Feature flag. Scripts return early when their own flag is off, so the user can
+   * disable one script without uninstalling it. Defaults to on.
+   */
+  function featureOn(name, dflt) {
+    var s = settings();
+    var f = s.features || {};
+    if (f[name] === undefined) return dflt === undefined ? true : !!dflt;
+    return !!f[name];
+  }
+
+  function setFeature(name, on) {
+    var s = settings();
+    var f = Object.assign({}, s.features || {});
+    f[name] = !!on;
+    saveSettings({ features: f });
+    return f;
+  }
+
+  var CSS_ID = 'ytk-shared-css';
+
+  function ensureCss() {
+    if (document.getElementById(CSS_ID)) return;
+    var st = document.createElement('style');
+    st.id = CSS_ID;
+    st.textContent = [
+      '.ytk2-bar{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:flex;gap:4px;',
+      'align-items:center;padding:5px;border-radius:999px;background:rgba(28,28,28,.96);',
+      'box-shadow:0 4px 20px rgba(0,0,0,.5);font:500 12px/1 system-ui,sans-serif;color:#eaeaea;',
+      'backdrop-filter:blur(8px);flex-wrap:wrap;max-width:calc(100vw - 32px)}',
+      '.ytk2-bar button{font:inherit;font-size:12px;padding:6px 10px;border-radius:999px;border:0;',
+      'cursor:pointer;background:transparent;color:#cfcfcf}',
+      '.ytk2-bar button:hover{background:#333;color:#fff}',
+      '.ytk2-panel{position:fixed;left:16px;bottom:64px;z-index:2147483001;width:min(420px,calc(100vw - 32px));',
+      'max-height:70vh;overflow:auto;border-radius:14px;background:#1c1c1c;color:#eaeaea;',
+      'box-shadow:0 8px 40px rgba(0,0,0,.6);font:400 12.5px/1.5 system-ui,sans-serif}',
+      '.ytk2-panel header{display:flex;align-items:center;gap:8px;padding:12px 14px;',
+      'border-bottom:1px solid #2e2e2e;position:sticky;top:0;background:#1c1c1c}',
+      '.ytk2-panel header b{flex:1;font-size:13px;font-weight:650}',
+      '.ytk2-panel .x{border:0;background:transparent;color:#9a9a9a;cursor:pointer;font-size:16px}',
+      '.ytk2-panel .body{padding:10px 14px 14px}',
+      '.ytk2-row{display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px solid #262626}',
+      '.ytk2-row:first-child{border-top:0}',
+      '.ytk2-row .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.ytk2-dim{color:#8f8f8f}',
+      '.ytk2-ok{color:#7ee787}',
+      '.ytk2-warn{color:#ffa657}',
+      '.ytk2-err{color:#ff8a80}',
+      '.ytk2-kv{display:flex;justify-content:space-between;padding:3px 0}',
+      '.ytk2-kv span:last-child{font-variant-numeric:tabular-nums;color:#fff}',
+      '.ytk2-toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:2147483647;',
+      'padding:5px 13px;border-radius:999px;background:rgba(15,15,15,.92);color:#fff;',
+      'font:500 12.5px/1.4 system-ui,sans-serif;pointer-events:none}'
+    ].join('');
+    (document.head || document.documentElement).appendChild(st);
+  }
+
+  var toastTimer = null;
+
+  function toast(text) {
+    ensureCss();
+    var el = document.getElementById('ytk2-toast');
+    if (!el) {
+      el = h('div', { id: 'ytk2-toast', class: 'ytk2-toast' });
+      (document.body || document.documentElement).appendChild(el);
+    }
+    el.textContent = String(text).slice(0, 60);
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      var node = document.getElementById('ytk2-toast');
+      if (node) node.remove();
+      toastTimer = null;
+    }, 1300);
+  }
+
+  var openPanel = null;
+
+  function closePanel() {
+    if (openPanel && openPanel.parentNode) openPanel.remove();
+    openPanel = null;
+  }
+
+  /** Transient panel. `build(body)` fills it. Returns {body, close}. */
+  function panel(title, build) {
+    ensureCss();
+    closePanel();
+    var body = h('div', { class: 'body' });
+    var box = h('div', { class: 'ytk2-panel' },
+      h('header', {}, h('b', { text: title }), h('button', { class: 'x', text: '✕', onclick: closePanel })),
+      body
+    );
+    (document.body || document.documentElement).appendChild(box);
+    openPanel = box;
+    if (typeof build === 'function') build(body);
+    return { body: body, close: closePanel };
+  }
+
+  function kv(body, label, value, cls) {
+    body.appendChild(h('div', { class: 'ytk2-kv' },
+      h('span', { class: 'ytk2-dim', text: label }),
+      h('span', { class: cls || '', text: String(value) })
+    ));
+  }
+
+  function note(body, text, cls) {
+    body.appendChild(h('div', { class: 'ytk2-dim ' + (cls || ''), style: 'padding:5px 0;line-height:1.55', text: text }));
+  }
+
+  var toolbarEl = null;
+  var toolbarButtons = [];
+
+  /**
+   * The ONE toolbar. Every feature script contributes buttons here instead of drawing
+   * its own chrome, so scripts cannot fight over the same corner of the page.
+   */
+  function mountToolbar(items) {
+    ensureCss();
+    if (!toolbarEl) {
+      toolbarEl = h('div', { class: 'ytk2-bar' });
+      (document.body || document.documentElement).appendChild(toolbarEl);
+    }
+    for (var i = 0; i < items.length; i++) {
+      (function (item) {
+        var btn = h('button', { text: item.label });
+        btn.addEventListener('click', function () {
+          try {
+            item.run(btn);
+          } catch (e) {
+            toast((item.label || 'Action') + ' failed: ' + e.message);
+          }
+        });
+        toolbarEl.appendChild(btn);
+        toolbarButtons.push(btn);
+      })(items[i]);
+    }
+    return function unmount() {
+      for (var j = 0; j < toolbarButtons.length; j++) {
+        if (toolbarButtons[j].parentNode) toolbarButtons[j].parentNode.removeChild(toolbarButtons[j]);
+      }
+      toolbarButtons = [];
+      if (toolbarEl && !toolbarEl.children.length && toolbarEl.parentNode) toolbarEl.remove();
+      toolbarEl = null;
+    };
+  }
+
   return {
     VERSION: VERSION,
     NS: NS,
@@ -564,6 +712,9 @@
     channelSubscribers: channelSubscribers,
     createPlaylist: createPlaylist, addVideos: addVideos, removeVideos: removeVideos,
     parseCount: parseCount, parseDuration: parseDuration, parseEpisode: parseEpisode,
-    notify: notify
+    notify: notify,
+    featureOn: featureOn, setFeature: setFeature,
+    toast: toast, panel: panel, kv: kv, note: note, closePanel: closePanel, ensureCss: ensureCss,
+    mountToolbar: mountToolbar
   };
 })();
